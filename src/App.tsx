@@ -52,6 +52,9 @@ export default function App() {
       } catch (e: any) {
         setKeyValidationStatus('invalid');
         let errorMessage = e.message || String(e);
+        if (errorMessage === 'Failed to fetch') {
+          errorMessage = 'Failed to fetch. Ini biasanya terjadi karena masalah CORS (tidak diizinkan diakses langsung dari browser), jaringan terputus, atau API tersebut tidak mengenali request SDK.';
+        }
         if (errorMessage.startsWith('{') && errorMessage.includes('"error"')) {
           try {
             const parsed = JSON.parse(errorMessage);
@@ -97,6 +100,9 @@ export default function App() {
     } catch (e: any) {
       setKeyValidationStatus('invalid');
       let errorMessage = e.message || String(e);
+      if (errorMessage === 'Failed to fetch') {
+        errorMessage = 'Failed to fetch. Ini biasanya terjadi karena masalah CORS (tidak diizinkan diakses langsung dari browser), jaringan terputus, atau API tersebut tidak mengenali request SDK.';
+      }
       // If it looks like JSON error from SDK
       if (errorMessage.startsWith('{') && errorMessage.includes('"error"')) {
         try {
