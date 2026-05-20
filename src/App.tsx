@@ -32,21 +32,35 @@ export default function App() {
   const [manualBaseUrl, setManualBaseUrl] = React.useState(() => localStorage.getItem('gemini_base_url') || '');
   const [isKeyValidating, setIsKeyValidating] = React.useState(false);
   const [keyValidationStatus, setKeyValidationStatus] = React.useState<'idle' | 'valid' | 'invalid'>('idle');
+  const [validationError, setValidationError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!manualApiKey) {
       setKeyValidationStatus('idle');
+      setValidationError(null);
       return;
     }
     
     setKeyValidationStatus('idle');
+    setValidationError(null);
     const timer = setTimeout(async () => {
       setIsKeyValidating(true);
       try {
         const isValid = await validateApiKey(manualApiKey);
         setKeyValidationStatus(isValid ? 'valid' : 'invalid');
-      } catch (e) {
+        setValidationError(isValid ? null : 'Failed to validate API Key.');
+      } catch (e: any) {
         setKeyValidationStatus('invalid');
+        let errorMessage = e.message || String(e);
+        if (errorMessage.startsWith('{') && errorMessage.includes('"error"')) {
+          try {
+            const parsed = JSON.parse(errorMessage);
+            if (parsed.error && parsed.error.message) {
+              errorMessage = `${parsed.error.code ? `[${parsed.error.code}] ` : ''}${parsed.error.message}`;
+            }
+          } catch {}
+        }
+        setValidationError(errorMessage);
       } finally {
         setIsKeyValidating(false);
       }
@@ -60,7 +74,11 @@ export default function App() {
       const customEvent = e as CustomEvent<string>;
       setManualApiKey(customEvent.detail);
       setKeyValidationStatus('valid'); // Since it fell back to a valid one or we wouldn't be here, but wait, it might be exhausted.
-      if (!customEvent.detail) setKeyValidationStatus('idle');
+      setValidationError(null);
+      if (!customEvent.detail) {
+        setKeyValidationStatus('idle');
+        setValidationError(null);
+      }
     };
     
     window.addEventListener('gemini_keys_updated', handleKeysUpdated);
@@ -71,11 +89,24 @@ export default function App() {
     if (!manualApiKey) return;
     setIsKeyValidating(true);
     setKeyValidationStatus('idle');
+    setValidationError(null);
     try {
       const isValid = await validateApiKey(manualApiKey);
       setKeyValidationStatus(isValid ? 'valid' : 'invalid');
-    } catch (e) {
+      setValidationError(isValid ? null : 'Failed to validate API Key.');
+    } catch (e: any) {
       setKeyValidationStatus('invalid');
+      let errorMessage = e.message || String(e);
+      // If it looks like JSON error from SDK
+      if (errorMessage.startsWith('{') && errorMessage.includes('"error"')) {
+        try {
+          const parsed = JSON.parse(errorMessage);
+          if (parsed.error && parsed.error.message) {
+            errorMessage = `${parsed.error.code ? `[${parsed.error.code}] ` : ''}${parsed.error.message}`;
+          }
+        } catch {}
+      }
+      setValidationError(errorMessage);
     } finally {
       setIsKeyValidating(false);
     }
@@ -405,21 +436,26 @@ export default function App() {
                     />
                   </div>
                   {(isKeyValidating || keyValidationStatus !== 'idle') && (
-                    <div className="flex items-center gap-2 mt-2">
+                    <div className="flex items-start gap-2 mt-2">
                       {isKeyValidating ? (
                         <>
-                          <div className="w-3 h-3 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+                          <div className="w-3 h-3 border-2 border-primary-500 border-t-transparent rounded-full animate-spin mt-0.5 shrink-0" />
                           <span className="text-xs text-slate-500 dark:text-white/60">Memvalidasi API Key...</span>
                         </>
                       ) : keyValidationStatus === 'valid' ? (
                         <>
-                          <div className="w-3 h-3 bg-emerald-500 rounded-full" />
+                          <div className="w-3 h-3 bg-emerald-500 rounded-full mt-0.5 shrink-0" />
                           <span className="text-xs text-emerald-600 dark:text-emerald-400">API Key valid dan aktif</span>
                         </>
                       ) : (
                         <>
-                          <div className="w-3 h-3 bg-red-500 rounded-full" />
-                          <span className="text-xs text-red-600 dark:text-red-400">API Key tidak valid atau tidak memiliki akses (contoh gemini-2.5-flash)</span>
+                          <div className="w-3 h-3 bg-red-500 rounded-full mt-0.5 shrink-0" />
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-red-600 dark:text-red-400 font-bold">Validasi gagal</span>
+                            <span className="text-[10px] bg-red-500/10 text-red-600 dark:text-red-400 p-2 rounded max-w-full break-words">
+                              {validationError || 'API Key tidak valid atau tidak memiliki akses (contoh gemini-1.5-flash)'}
+                            </span>
+                          </div>
                         </>
                       )}
                     </div>

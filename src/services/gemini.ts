@@ -81,8 +81,18 @@ const getApiKeysList = (): string[] => {
 
 const getBaseUrl = () => {
   if (typeof window !== 'undefined') {
-    const localBaseUrl = localStorage.getItem('gemini_base_url');
-    if (localBaseUrl) return localBaseUrl;
+    let localBaseUrl = localStorage.getItem('gemini_base_url');
+    if (localBaseUrl) {
+      localBaseUrl = localBaseUrl.trim();
+      if (!localBaseUrl.startsWith('http://') && !localBaseUrl.startsWith('https://')) {
+        localBaseUrl = 'https://' + localBaseUrl;
+      }
+      if (localBaseUrl.endsWith('/')) localBaseUrl = localBaseUrl.slice(0, -1);
+      if (localBaseUrl.endsWith('/v1beta')) localBaseUrl = localBaseUrl.slice(0, -7);
+      else if (localBaseUrl.endsWith('/v1alpha')) localBaseUrl = localBaseUrl.slice(0, -8);
+      else if (localBaseUrl.endsWith('/v1')) localBaseUrl = localBaseUrl.slice(0, -3);
+      return localBaseUrl;
+    }
   }
   return undefined;
 };
@@ -98,7 +108,7 @@ const executeWithKeyRotation = async <T>(operation: (ai: GoogleGenAI) => Promise
     const apiKey = keys[0];
     const ai = new GoogleGenAI({ 
       apiKey,
-      ...(baseUrl ? { httpOptions: { baseUrl } } : {})
+      ...(baseUrl ? { httpOptions: { baseUrl, apiVersion: "v1beta" } } : {})
     });
     
     try {
@@ -134,12 +144,13 @@ export async function validateApiKey(apiKeyInput: string): Promise<boolean> {
   if (keys.length === 0) return false;
   
   const baseUrl = getBaseUrl();
+  let lastError: any;
   
   for (const apiKey of keys) {
     try {
       const ai = new GoogleGenAI({ 
         apiKey,
-        ...(baseUrl ? { httpOptions: { baseUrl } } : {})
+        ...(baseUrl ? { httpOptions: { baseUrl, apiVersion: "v1beta" } } : {})
       });
       // Lightweight call to check validity
       await ai.models.generateContent({
@@ -148,9 +159,12 @@ export async function validateApiKey(apiKeyInput: string): Promise<boolean> {
       });
       return true; // At least one valid key
     } catch (error) {
-      console.warn(`Validation failed for key ${apiKey.substring(0, 4)}...`);
+      console.warn(`Validation failed for key ${apiKey.substring(0, 4)}...`, error);
+      lastError = error;
     }
   }
+  
+  if (lastError) throw lastError;
   return false;
 }
 
