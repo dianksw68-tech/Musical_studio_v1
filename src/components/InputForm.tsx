@@ -331,7 +331,7 @@ export const InputForm: React.FC<InputFormProps> = ({ onGenerate, isLoading, ini
             <label className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-primary-500 mb-2">
               <Camera size={14} /> Upload Karakter (Opsional)
             </label>
-            <div className="relative group">
+            <div className="relative group flex flex-col gap-3">
               <input
                 type="file"
                 accept="image/*"
@@ -342,17 +342,6 @@ export const InputForm: React.FC<InputFormProps> = ({ onGenerate, isLoading, ini
                     reader.onloadend = async () => {
                       const base64 = reader.result as string;
                       setInputs({ ...inputs, characterImage: base64 });
-                      
-                      // Auto-describe image
-                      setIsDescribing(true);
-                      try {
-                        const description = await describeImage(base64);
-                        setInputs(prev => ({ ...prev, characterDescription: description }));
-                      } catch (err) {
-                        console.error("Failed to describe image:", err);
-                      } finally {
-                        setIsDescribing(false);
-                      }
                     };
                     reader.readAsDataURL(file);
                   }
@@ -373,7 +362,7 @@ export const InputForm: React.FC<InputFormProps> = ({ onGenerate, isLoading, ini
                     <div className="w-10 h-10 rounded-lg overflow-hidden border border-primary-500/30">
                       <img src={inputs.characterImage} alt="Preview" className="w-full h-full object-cover" />
                     </div>
-                    <span className="text-xs font-mono uppercase tracking-widest">Karakter Terpasang</span>
+                    <span className="text-xs font-mono uppercase tracking-widest leading-none">Karakter Terpasang</span>
                     <button 
                       type="button"
                       onClick={(e) => {
@@ -392,6 +381,30 @@ export const InputForm: React.FC<InputFormProps> = ({ onGenerate, isLoading, ini
                   </>
                 )}
               </label>
+              
+              {/* Auto Describe Button (Separate) */}
+              {inputs.characterImage && (
+                <button
+                  type="button"
+                  disabled={isDescribing}
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    setIsDescribing(true);
+                    try {
+                      const description = await describeImage(inputs.characterImage!);
+                      setInputs(prev => ({ ...prev, characterDescription: description }));
+                    } catch (err) {
+                      console.error("Failed to describe image:", err);
+                    } finally {
+                      setIsDescribing(false);
+                    }
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-primary-500 border border-primary-600 text-white rounded-xl transition-colors font-mono text-xs uppercase tracking-widest disabled:opacity-50 hover:bg-primary-600 shadow-sm"
+                >
+                  {isDescribing ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                  {isDescribing ? 'Menganalisis Karakter...' : 'Auto-Describe (AI)'}
+                </button>
+              )}
             </div>
           </div>
         </div>
