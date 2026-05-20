@@ -143,7 +143,7 @@ export async function validateApiKey(apiKeyInput: string): Promise<boolean> {
       });
       // Lightweight call to check validity
       await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-1.5-flash",
         contents: "hello",
       });
       return true; // At least one valid key
@@ -157,7 +157,7 @@ export async function validateApiKey(apiKeyInput: string): Promise<boolean> {
 export async function describeImage(imageData: string): Promise<string> {
   return executeWithKeyRotation(async (ai) => {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash',
       contents: {
         parts: [
           { text: "Describe this image in detail for an AI image generator prompt. Focus on the person's appearance, clothing, pose, and the background environment. Keep it concise (1-2 sentences)." },
@@ -186,7 +186,7 @@ ${snippet}
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash',
       contents: prompt,
     });
 
@@ -213,7 +213,7 @@ ${lyrics}
 `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-1.5-flash',
       contents: prompt,
     });
 
@@ -237,7 +237,7 @@ export async function generateThumbnailImage(prompt: string, characterImage?: st
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-image',
+      model: 'gemini-1.5-flash',
       contents: { parts: contents },
       config: {
         imageConfig: {
@@ -271,7 +271,7 @@ export async function generateStudioAssets(inputs: AppInputs): Promise<AppOutput
     `;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-1.5-flash",
       contents: prompt,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
