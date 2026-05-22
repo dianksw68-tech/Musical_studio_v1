@@ -1,5 +1,6 @@
 {
   "name": "Remix: Musical Studio",
   "description": "Aplikasi pembuat aset lengkap untuk produksi musik AI (Suno.com) dan SEO YouTube untuk berbagai channel.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

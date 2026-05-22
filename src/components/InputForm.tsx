@@ -2,7 +2,7 @@ import React from 'react';
 import { Music, MapPin, Sparkles, User, Send, Camera, X, Radio, Loader2 } from 'lucide-react';
 import { AppInputs, VIBE_OPTIONS, RANDOM_THEMES, LYRICS_LANGUAGES, BASE_LANGUAGES, RANDOM_LOCATIONS } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
-import { Languages, Check } from 'lucide-react';
+import { Languages, Check, History } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { describeImage } from '../services/gemini';
 
@@ -10,9 +10,10 @@ interface InputFormProps {
   onGenerate: (inputs: AppInputs) => void;
   isLoading: boolean;
   initialData?: AppInputs;
+  onOpenHistory?: () => void;
 }
 
-export const InputForm: React.FC<InputFormProps> = ({ onGenerate, isLoading, initialData }) => {
+export const InputForm: React.FC<InputFormProps> = ({ onGenerate, isLoading, initialData, onOpenHistory }) => {
   const [inputs, setInputs] = React.useState<AppInputs>({
     channelName: initialData?.channelName || '',
     songTitle: initialData?.songTitle || '',
@@ -37,7 +38,7 @@ export const InputForm: React.FC<InputFormProps> = ({ onGenerate, isLoading, ini
       const isCustomLang = initialData.lyricsLanguage && !LYRICS_LANGUAGES.includes(initialData.lyricsLanguage) && initialData.lyricsLanguage !== 'Custom Language' && !initialData.lyricsLanguage.includes(',');
       if (isCustomLang) setCustomLang(initialData.lyricsLanguage || '');
 
-      const isCustomVibe = initialData.vibe && !VIBE_OPTIONS.includes(initialData.vibe as VibeOption) && initialData.vibe !== 'Custom Vibe' && initialData.vibe !== 'Random Vibe';
+      const isCustomVibe = initialData.vibe && !VIBE_OPTIONS.includes(initialData.vibe as any) && initialData.vibe !== 'Custom Vibe' && initialData.vibe !== 'Random Vibe';
       if (isCustomVibe) setCustomVibe(initialData.vibe || '');
       
       if (initialData.lyricsLanguage && initialData.lyricsLanguage.includes(',')) {
@@ -451,23 +452,34 @@ export const InputForm: React.FC<InputFormProps> = ({ onGenerate, isLoading, ini
       {/* Fixed bottom footer for submit button using Portal to escape transforms */}
       {typeof document !== 'undefined' && createPortal(
         <div className="fixed bottom-0 left-0 right-0 z-[100] bg-slate-50/95 dark:bg-[#0A0A0A]/95 backdrop-blur-md border-t border-slate-300 dark:border-white/10 p-4 pb-safe flex justify-center">
-          <div className="w-full max-w-2xl mx-auto">
+          <div className="w-full max-w-2xl mx-auto flex items-center gap-3">
+            {onOpenHistory && (
+              <button
+                type="button"
+                onClick={onOpenHistory}
+                className="bg-slate-200/50 dark:bg-white/5 hover:bg-slate-300/50 dark:hover:bg-white/10 border border-slate-300 dark:border-white/10 text-slate-600 dark:text-white/80 p-4 rounded-2xl transition-all flex items-center justify-center shrink-0"
+                title="View History"
+              >
+                <History size={20} />
+              </button>
+            )}
+            
             <button
               type="submit"
               onClick={handleSubmit}
               disabled={isLoading || isDescribing}
-              className="w-full bg-primary-600 hover:bg-primary-500 disabled:bg-primary-800 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl shadow-xl shadow-primary-500/20 transition-all flex items-center justify-center gap-3 group"
+              className="flex-1 bg-primary-600 hover:bg-primary-500 disabled:bg-primary-800 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl shadow-xl shadow-primary-500/20 transition-all flex items-center justify-center gap-3 group"
             >
               {isLoading ? (
                 <div className="w-6 h-6 border-2 border-slate-400 dark:border-white/30 border-t-white rounded-full animate-spin" />
               ) : isDescribing ? (
                 <>
                   <Loader2 size={18} className="animate-spin" />
-                  <span className="uppercase tracking-widest text-sm">Menganalisis Karakter...</span>
+                  <span className="uppercase tracking-widest text-sm text-[10px] sm:text-sm">Menganalisis Karakter...</span>
                 </>
               ) : (
                 <>
-                  <span className="uppercase tracking-widest text-sm">Generate Aset Studio</span>
+                  <span className="uppercase tracking-widest text-[10px] sm:text-sm">Generate Aset Studio</span>
                   <Send size={18} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
                 </>
               )}

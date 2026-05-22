@@ -10,7 +10,7 @@ export const AudioVisualizer: React.FC<AudioVisualizerProps> = ({ audioRef }) =>
   const analyzerRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const rqRef = useRef<number>();
+  const rqRef = useRef<number>(0);
 
   useEffect(() => {
     const audioEl = audioRef.current;

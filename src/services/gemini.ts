@@ -1,4 +1,3 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import { AppInputs, AppOutputs } from "../types";
 
 const SYSTEM_INSTRUCTION = `
@@ -91,28 +90,40 @@ const getBaseUrl = () => {
       if (localBaseUrl.endsWith('/v1beta')) localBaseUrl = localBaseUrl.slice(0, -7);
       else if (localBaseUrl.endsWith('/v1alpha')) localBaseUrl = localBaseUrl.slice(0, -8);
       else if (localBaseUrl.endsWith('/v1')) localBaseUrl = localBaseUrl.slice(0, -3);
+      
+      if (localBaseUrl.includes('kei.ai')) {
+        localBaseUrl = localBaseUrl.replace('kei.ai', 'kie.ai');
+      }
       return localBaseUrl;
     }
   }
-  return undefined;
+  return 'https://api.kie.ai';
 };
 
-const executeWithKeyRotation = async <T>(operation: (ai: GoogleGenAI) => Promise<T>): Promise<T> => {
+const getKieSettings = () => {
+  if (typeof window !== 'undefined') {
+    return {
+      model: localStorage.getItem('kie_model') || 'gpt-5.2',
+      maxTokens: parseInt(localStorage.getItem('kie_max_tokens') || '4096', 10),
+      topP: parseFloat(localStorage.getItem('kie_top_p') || '0.85'),
+      temperature: parseFloat(localStorage.getItem('kie_temperature') || '0.95'),
+    };
+  }
+  return { model: 'gpt-5.2', maxTokens: 4096, topP: 0.85, temperature: 0.95 };
+};
+
+const executeWithKeyRotation = async <T>(operation: (apiKey: string, baseUrl: string) => Promise<T>): Promise<T> => {
   let keys = getApiKeysList();
-  if (keys.length === 0) throw new Error("API Key Gemini tidak ditemukan.");
+  if (keys.length === 0) throw new Error("API Key tidak ditemukan.");
   
   const baseUrl = getBaseUrl();
   let lastError: any;
   
   while (keys.length > 0) {
     const apiKey = keys[0];
-    const ai = new GoogleGenAI({ 
-      apiKey,
-      ...(baseUrl ? { httpOptions: { baseUrl, apiVersion: "v1beta" } } : {})
-    });
     
     try {
-      return await operation(ai);
+      return await operation(apiKey, baseUrl);
     } catch (error: any) {
       lastError = error;
       console.warn(`API call failed with key ${apiKey.substring(0, 4)}... Error: ${error.message}`);
@@ -139,6 +150,104 @@ const executeWithKeyRotation = async <T>(operation: (ai: GoogleGenAI) => Promise
   throw lastError;
 };
 
+const fetchOpenAI = async (
+  apiKey: string,
+  baseUrl: string,
+  messages: Array<{role: string, content: any}>,
+  systemInstruction?: string,
+  responseFormat?: any
+) => {
+  const settings = getKieSettings();
+  
+  let endpoint = `${baseUrl}/v1/chat/completions`;
+  if (baseUrl.includes('kie.ai') || baseUrl.includes('kei.ai')) {
+    const urlModel = settings.model.replace(/\./g, '-');
+    const fixedBaseUrl = baseUrl.replace('kei.ai', 'kie.ai');
+    endpoint = `${fixedBaseUrl}/${urlModel}/v1/chat/completions`;
+  }
+
+  const payloadMessages = [];
+  if (systemInstruction) {
+    payloadMessages.push({ role: "system", content: systemInstruction });
+  }
+  payloadMessages.push(...messages);
+
+  const payload: any = {
+    model: settings.model,
+    messages: payloadMessages,
+    max_tokens: settings.maxTokens,
+    top_p: settings.topP,
+    temperature: settings.temperature,
+  };
+
+  if (responseFormat) {
+    payload.response_format = responseFormat;
+  }
+
+  const response = await fetch('/api/proxy', {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      endpoint,
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
+      body: payload
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    let finalMessage = `API Error: ${response.status} ${response.statusText}`;
+    try {
+      const parsed = JSON.parse(errText);
+      finalMessage = parsed.error?.message || parsed.msg || finalMessage;
+      if (parsed.error?.details && typeof parsed.error.details === 'string') {
+        try {
+          const nestedParsed = JSON.parse(parsed.error.details);
+          if (nestedParsed.error?.message) {
+            finalMessage = nestedParsed.error.message;
+          } else if (nestedParsed.detail) {
+            finalMessage = typeof nestedParsed.detail === 'string' ? nestedParsed.detail : JSON.stringify(nestedParsed.detail);
+          }
+        } catch {}
+      }
+    } catch {}
+    
+    const error: any = new Error(finalMessage);
+    error.status = response.status;
+    throw error;
+  }
+
+  const data = await response.json();
+  if (data.error) {
+    throw new Error(data.error.message || JSON.stringify(data.error));
+  }
+  
+  if (data.code && data.msg) {
+    throw new Error(data.msg);
+  }
+  
+  if (data.detail) {
+    throw new Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail));
+  }
+
+  if (data.message && !data.choices) {
+    throw new Error(data.message);
+  }
+  
+  if (!data.choices || !data.choices[0]) {
+    console.error("Unexpected response format:", data);
+    throw new Error("Format respons tidak valid dari API. Rincian: " + JSON.stringify(data).substring(0, 100));
+  }
+  
+  return data.choices[0].message.content;
+};
+
 export async function validateApiKey(apiKeyInput: string): Promise<boolean> {
   const keys = apiKeyInput.split(/[\n, ]+/).map(k => k.trim()).filter(k => k.length > 0);
   if (keys.length === 0) return false;
@@ -148,15 +257,7 @@ export async function validateApiKey(apiKeyInput: string): Promise<boolean> {
   
   for (const apiKey of keys) {
     try {
-      const ai = new GoogleGenAI({ 
-        apiKey,
-        ...(baseUrl ? { httpOptions: { baseUrl, apiVersion: "v1beta" } } : {})
-      });
-      // Lightweight call to check validity
-      await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: "hello",
-      });
+      await fetchOpenAI(apiKey, baseUrl, [{ role: "user", content: "hello" }]);
       return true; // At least one valid key
     } catch (error) {
       console.warn(`Validation failed for key ${apiKey.substring(0, 4)}...`, error);
@@ -168,29 +269,42 @@ export async function validateApiKey(apiKeyInput: string): Promise<boolean> {
   return false;
 }
 
-export async function describeImage(imageData: string): Promise<string> {
-  return executeWithKeyRotation(async (ai) => {
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: {
-        parts: [
-          { text: "Describe this image in detail for an AI image generator prompt. Focus on the person's appearance, clothing, pose, and the background environment. Keep it concise (1-2 sentences)." },
-          {
-            inlineData: {
-              data: imageData.split(',')[1],
-              mimeType: imageData.split(';')[0].split(':')[1]
-            }
-          }
-        ]
-      }
-    });
+export async function validateAistudioKey(apiKey: string): Promise<boolean> {
+  const trimmedKey = apiKey.trim();
+  if (!trimmedKey) return false;
+  
+  const response = await fetch('/api/validate-aistudio-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey: trimmedKey })
+  });
+  
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error?.message || "Failed to validate AI Studio API Key.");
+  }
+  
+  return true;
+}
 
-    return response.text || "A person in the provided image.";
+export async function describeImage(imageData: string): Promise<string> {
+  return executeWithKeyRotation(async (apiKey, baseUrl) => {
+    return await fetchOpenAI(
+      apiKey, 
+      baseUrl, 
+      [{ 
+        role: "user", 
+        content: [
+          { type: "text", text: "Describe this image in detail for an AI image generator prompt. Focus on the person's appearance, clothing, pose, and the background environment. Keep it concise (1-2 sentences)." },
+          { type: "image_url", image_url: { url: imageData } }
+        ] 
+      }]
+    );
   });
 }
 
 export async function remixLyricSnippet(snippet: string, instruction: string): Promise<string> {
-  return executeWithKeyRotation(async (ai) => {
+  return executeWithKeyRotation(async (apiKey, baseUrl) => {
     const prompt = `
 Kamu adalah penulis lirik profesional. Tolong ubah/remix potongan lirik berikut sesuai dengan instruksi: "${instruction}".
 Hanya berikan respons berupa lirik yang sudah diubah tanpa teks pengantar, penjelasan, tanda kutip, atau penanda markdown tambahan (kecuali tag bait seperti [Chorus]).
@@ -198,18 +312,12 @@ Hanya berikan respons berupa lirik yang sudah diubah tanpa teks pengantar, penje
 Lirik asli:
 ${snippet}
 `;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: prompt,
-    });
-
-    return response.text?.trim() || snippet;
+    return await fetchOpenAI(apiKey, baseUrl, [{ role: "user", content: prompt }]);
   });
 }
 
 export async function enhanceLyricsWithTags(lyrics: string, style: string): Promise<string> {
-  return executeWithKeyRotation(async (ai) => {
+  return executeWithKeyRotation(async (apiKey, baseUrl) => {
     const prompt = `
 Kamu adalah pakar AI musik untuk platform Suno.com. Tugasmu adalah menyisipkan meta-tag khusus Suno.com (structure tags & style tags) ke dalam lirik ini agar hasil lagu saat di-generate lebih hidup, berdimensi, dan sesuai dengan vibe.
 
@@ -225,53 +333,31 @@ Instruksi PENTING:
 Lirik asli:
 ${lyrics}
 `;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: prompt,
-    });
-
-    return response.text?.trim() || lyrics;
+    return await fetchOpenAI(apiKey, baseUrl, [{ role: "user", content: prompt }]);
   });
 }
 
-export async function generateThumbnailImage(prompt: string, characterImage?: string): Promise<string> {
-  return executeWithKeyRotation(async (ai) => {
-    const contents: any[] = [{ text: prompt }];
-    
-    if (characterImage) {
-      const base64Data = characterImage.split(',')[1];
-      const mimeType = characterImage.split(';')[0].split(':')[1];
-      contents.push({
-        inlineData: {
-          data: base64Data,
-          mimeType: mimeType
-        }
-      });
-    }
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-1.5-flash',
-      contents: { parts: contents },
-      config: {
-        imageConfig: {
-          aspectRatio: "16:9",
-        }
-      }
-    });
-
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
-      }
-    }
-
-    throw new Error("Gagal menghasilkan gambar thumbnail.");
+export async function generateThumbnailImage(prompt: string, characterImage?: string, apiKey?: string): Promise<string> {
+  // Use our server-side API endpoint that uses Google AI Studio's image generator
+  const response = await fetch('/api/generate-image', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ prompt, apiKey })
   });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error?.message || "Failed to generate thumbnail image");
+  }
+
+  const data = await response.json();
+  return data.imageUrl;
 }
 
 export async function generateStudioAssets(inputs: AppInputs): Promise<AppOutputs> {
-  return executeWithKeyRotation(async (ai) => {
+  return executeWithKeyRotation(async (apiKey, baseUrl) => {
     const prompt = `
       Nama Channel: ${inputs.channelName}
       Judul Lagu: ${inputs.songTitle}
@@ -284,83 +370,22 @@ export async function generateStudioAssets(inputs: AppInputs): Promise<AppOutput
       BPM (Tempo): ${inputs.bpm}
     `;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: prompt,
-      config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            lyrics: { type: Type.STRING },
-            translation: { type: Type.STRING },
-            stylePrompts: { 
-              type: Type.ARRAY,
-              items: { type: Type.STRING }
-            },
-            basePrompt: { type: Type.STRING },
-            characterDescription: { type: Type.STRING },
-            imagePrompt: { type: Type.STRING },
-            textOverlayInstructions: { type: Type.STRING },
-            seoMetadata: { 
-              type: Type.OBJECT,
-              properties: {
-                titles: { 
-                  type: Type.ARRAY, 
-                  items: { type: Type.STRING } 
-                },
-                description: { type: Type.STRING },
-                tags: { type: Type.STRING },
-                pinnedComment: { type: Type.STRING },
-                shorts: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    tags: { type: Type.STRING },
-                  },
-                  required: ["title", "description", "tags"]
-                }
-              },
-              required: ["titles", "description", "tags", "pinnedComment", "shorts"]
-            },
-            visualAssets: {
-              type: Type.OBJECT,
-              properties: {
-                scenes: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      id: { type: Type.STRING },
-                      lyricsSnippet: { type: Type.STRING },
-                      imagePrompt: { type: Type.STRING },
-                      videoPrompts: { 
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING }
-                      },
-                    },
-                    required: ["id", "lyricsSnippet", "imagePrompt", "videoPrompts"]
-                  }
-                }
-              },
-              required: ["scenes"]
-            }
-          },
-          required: ["lyrics", "translation", "stylePrompts", "basePrompt", "imagePrompt", "textOverlayInstructions", "seoMetadata", "visualAssets"],
-        },
-      },
-    });
+    const responseText = await fetchOpenAI(
+      apiKey,
+      baseUrl,
+      [{ role: "user", content: prompt }],
+      SYSTEM_INSTRUCTION,
+      { type: "json_object" }
+    );
 
     let result;
     try {
-      const text = response.text || '{}';
+      const text = responseText || '{}';
       const jsonString = text.replace(/```json\n?|```/g, '').trim();
       result = JSON.parse(jsonString);
     } catch (e) {
-      console.error("Failed to parse JSON from Gemini:", e);
-      const match = response.text?.match(/\{[\s\S]*\}/);
+      console.error("Failed to parse JSON from AI:", e);
+      const match = responseText?.match(/\{[\s\S]*\}/);
       if (match) {
         try {
           result = JSON.parse(match[0]);

@@ -2,12 +2,13 @@ import React from 'react';
 import { InputForm } from './components/InputForm';
 import { OutputSection } from './components/OutputSection';
 import { AppInputs, AppOutputs, HistoryEntry } from './types';
-import { generateStudioAssets, generateThumbnailImage, validateApiKey } from './services/gemini';
+import { generateStudioAssets, generateThumbnailImage, validateApiKey, validateAistudioKey } from './services/gemini';
 import { motion, AnimatePresence } from 'motion/react';
-import { Mic2, Music2, Youtube, Radio, X, ArrowLeft, Settings, Moon, Sun } from 'lucide-react';
+import { Mic2, Music2, Youtube, Radio, X, ArrowLeft, Settings, Moon, Sun, History } from 'lucide-react';
+import { HistoryList } from './components/HistoryList';
 
 export default function App() {
-  const [view, setView] = React.useState<'input' | 'output'>('input');
+  const [view, setView] = React.useState<'input' | 'output' | 'history'>('input');
   const [isLoading, setIsLoading] = React.useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = React.useState(false);
   const [outputs, setOutputs] = React.useState<AppOutputs | null>(null);
@@ -29,10 +30,19 @@ export default function App() {
   const [appTheme, setAppTheme] = React.useState<'emerald' | 'blue' | 'violet' | 'rose'>('emerald');
   const [isDarkMode, setIsDarkMode] = React.useState(true);
   const [manualApiKey, setManualApiKey] = React.useState(() => localStorage.getItem('gemini_api_key') || '');
-  const [manualBaseUrl, setManualBaseUrl] = React.useState(() => localStorage.getItem('gemini_base_url') || '');
+  const [aistudioApiKey, setAistudioApiKey] = React.useState(() => localStorage.getItem('aistudio_api_key') || '');
+  const [manualBaseUrl, setManualBaseUrl] = React.useState(() => localStorage.getItem('gemini_base_url') || 'https://api.kie.ai');
+  const [kieModel, setKieModel] = React.useState(() => localStorage.getItem('kie_model') || 'gpt-5.2');
+  const [kieMaxTokens, setKieMaxTokens] = React.useState(() => localStorage.getItem('kie_max_tokens') || '4096');
+  const [kieTopP, setKieTopP] = React.useState(() => localStorage.getItem('kie_top_p') || '0.85');
+  const [kieTemperature, setKieTemperature] = React.useState(() => localStorage.getItem('kie_temperature') || '0.95');
   const [isKeyValidating, setIsKeyValidating] = React.useState(false);
   const [keyValidationStatus, setKeyValidationStatus] = React.useState<'idle' | 'valid' | 'invalid'>('idle');
   const [validationError, setValidationError] = React.useState<string | null>(null);
+
+  const [isAistudioKeyValidating, setIsAistudioKeyValidating] = React.useState(false);
+  const [aistudioKeyValidationStatus, setAistudioKeyValidationStatus] = React.useState<'idle' | 'valid' | 'invalid'>('idle');
+  const [aistudioValidationError, setAistudioValidationError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!manualApiKey) {
@@ -71,6 +81,32 @@ export default function App() {
     
     return () => clearTimeout(timer);
   }, [manualApiKey]);
+
+  React.useEffect(() => {
+    if (!aistudioApiKey) {
+      setAistudioKeyValidationStatus('idle');
+      setAistudioValidationError(null);
+      return;
+    }
+    
+    setAistudioKeyValidationStatus('idle');
+    setAistudioValidationError(null);
+    const timer = setTimeout(async () => {
+      setIsAistudioKeyValidating(true);
+      try {
+        const isValid = await validateAistudioKey(aistudioApiKey);
+        setAistudioKeyValidationStatus(isValid ? 'valid' : 'invalid');
+        setAistudioValidationError(isValid ? null : 'Failed to validate AI Studio Key.');
+      } catch (e: any) {
+        setAistudioKeyValidationStatus('invalid');
+        setAistudioValidationError(e.message || String(e));
+      } finally {
+        setIsAistudioKeyValidating(false);
+      }
+    }, 1500);
+    
+    return () => clearTimeout(timer);
+  }, [aistudioApiKey]);
 
   React.useEffect(() => {
     const handleKeysUpdated = (e: Event) => {
@@ -118,6 +154,24 @@ export default function App() {
     }
   };
 
+  const handleValidateAistudioKey = async () => {
+    if (!aistudioApiKey) return;
+    setIsAistudioKeyValidating(true);
+    setAistudioKeyValidationStatus('idle');
+    setAistudioValidationError(null);
+    try {
+      const isValid = await validateAistudioKey(aistudioApiKey);
+      setAistudioKeyValidationStatus(isValid ? 'valid' : 'invalid');
+      setAistudioValidationError(isValid ? null : 'Failed to validate AI Studio Key.');
+    } catch (e: any) {
+      setAistudioKeyValidationStatus('invalid');
+      let errorMessage = e.message || String(e);
+      setAistudioValidationError(errorMessage);
+    } finally {
+      setIsAistudioKeyValidating(false);
+    }
+  };
+
   const outputRef = React.useRef<HTMLDivElement>(null);
 
   const handleCancel = () => {
@@ -156,8 +210,8 @@ export default function App() {
         const closeUpPrompt = `Extreme close-up portrait, detailed face, ${result.basePrompt}`;
         
         const [fullImg, closeImg] = await Promise.all([
-          generateThumbnailImage(fullBodyPrompt, inputs.characterImage),
-          generateThumbnailImage(closeUpPrompt, inputs.characterImage)
+          generateThumbnailImage(fullBodyPrompt, inputs.characterImage, aistudioApiKey),
+          generateThumbnailImage(closeUpPrompt, inputs.characterImage, aistudioApiKey)
         ]);
         
         if (controller.signal.aborted) return;
@@ -222,7 +276,7 @@ export default function App() {
         referenceImage = type === 'full' ? outputs.generatedImageFull : outputs.generatedImageClose;
       }
       
-      const imageUrl = await generateThumbnailImage(finalPrompt, referenceImage);
+      const imageUrl = await generateThumbnailImage(finalPrompt, referenceImage, aistudioApiKey);
       setOutputs({ ...outputs, imagePrompt: editedPrompt, generatedThumbnail: imageUrl });
     } catch (err: any) {
       console.error(err);
@@ -237,7 +291,7 @@ export default function App() {
     
     setIsGeneratingImage(true);
     try {
-      const imageUrl = await generateThumbnailImage(prompt, lastInputs.characterImage);
+      const imageUrl = await generateThumbnailImage(prompt, lastInputs.characterImage, aistudioApiKey);
       const updatedScenes = outputs.visualAssets.scenes.map(s => 
         s.id === sceneId ? { ...s, generatedImage: imageUrl } : s
       );
@@ -267,8 +321,8 @@ export default function App() {
       const closeUpPrompt = `Extreme close-up portrait, detailed face, ${basePrompt}`;
       
       const [fullImg, closeImg] = await Promise.all([
-        generateThumbnailImage(fullBodyPrompt, lastInputs.characterImage),
-        generateThumbnailImage(closeUpPrompt, lastInputs.characterImage)
+        generateThumbnailImage(fullBodyPrompt, lastInputs.characterImage, aistudioApiKey),
+        generateThumbnailImage(closeUpPrompt, lastInputs.characterImage, aistudioApiKey)
       ]);
       
       setOutputs({ 
@@ -346,9 +400,9 @@ export default function App() {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="w-full max-w-md bg-slate-50 dark:bg-[#0A0A0A] border border-slate-300 dark:border-white/10 rounded-2xl overflow-hidden shadow-2xl"
+              className="w-full max-w-md bg-slate-50 dark:bg-[#0A0A0A] border border-slate-300 dark:border-white/10 rounded-2xl overflow-hidden shadow-2xl max-h-[90vh] flex flex-col"
             >
-              <div className="flex items-center justify-between p-6 border-b border-slate-300 dark:border-white/10 bg-slate-200/50 dark:bg-white/5">
+              <div className="flex items-center justify-between p-6 border-b border-slate-300 dark:border-white/10 bg-slate-200/50 dark:bg-white/5 shrink-0">
                 <h2 className="text-lg font-serif italic text-slate-900 dark:text-white flex items-center gap-2">
                   <Settings size={18} className="text-primary-500" /> Pengaturan App
                 </h2>
@@ -356,7 +410,7 @@ export default function App() {
                   <X size={20} />
                 </button>
               </div>
-              <div className="p-6 space-y-6">
+              <div className="p-6 space-y-6 overflow-y-auto max-h-[80vh] custom-scrollbar">
                 <div className="space-y-3">
                   <label className="text-[10px] font-mono uppercase tracking-widest text-primary-500/50">Warna Tema (Accent Color)</label>
                   <div className="grid grid-cols-4 gap-2">
@@ -395,18 +449,9 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <label className="text-[10px] font-mono uppercase tracking-widest text-primary-500/50">Model Generation</label>
-                  <p className="text-xs text-slate-600 dark:text-white/60 mb-2">Pilih kualitas generasi aset (Default menggunakan Flash untuk kecepatan).</p>
-                  <div className="flex gap-2">
-                    <button className="flex-1 py-2 px-4 rounded-lg bg-primary-500/10 border border-primary-500 text-primary-500 text-sm font-medium">Flash (Fast)</button>
-                    <button disabled className="flex-1 py-2 px-4 rounded-lg bg-slate-200/50 dark:bg-white/5 border border-slate-300 dark:border-white/10 text-slate-400 dark:text-white/30 text-sm font-medium cursor-not-allowed">Pro (Soon)</button>
-                  </div>
-                </div>
-
                 <div className="space-y-3 pt-2">
-                  <label className="text-[10px] font-mono uppercase tracking-widest text-primary-500/50">Tukar API Key Manual</label>
-                  <p className="text-xs text-slate-600 dark:text-white/60 mb-2">Opsional: Masukkan API Key Gemini pribadi Anda (akan disimpan di browser). Jika dikosongkan, akan memakai setting default.</p>
+                  <label className="text-[10px] font-mono uppercase tracking-widest text-primary-500/50">Tukar API Key Manual (Kie.ai Text)</label>
+                  <p className="text-xs text-slate-600 dark:text-white/60 mb-2">Opsional: Masukkan API Key pribadi Anda (akan disimpan di browser). Jika dikosongkan, akan memakai setting default.</p>
                   <div className="flex flex-col gap-2">
                     <div className="flex gap-2">
                       <textarea
@@ -417,7 +462,7 @@ export default function App() {
                           if (val) localStorage.setItem('gemini_api_key', val);
                           else localStorage.removeItem('gemini_api_key');
                         }}
-                        placeholder="API Key (mis. AIzaSy..., kei.io, atau magnific.com)&#10;Bisa masukkan lebih dari satu, pisahkan dengan enter/koma"
+                        placeholder="API Key (mis. sk-... atau AIzaSy...)&#10;Bisa masukkan lebih dari satu, pisahkan dengan enter/koma"
                         className={`flex-1 bg-slate-200/50 dark:bg-white/5 border rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/30 outline-none transition-colors min-h-[60px] resize-y custom-scrollbar ${keyValidationStatus === 'invalid' ? 'border-red-500 focus:border-red-500' : keyValidationStatus === 'valid' ? 'border-emerald-500 focus:border-emerald-500' : 'border-slate-300 dark:border-white/10 focus:border-primary-500'}`}
                       />
                       <button
@@ -428,18 +473,6 @@ export default function App() {
                         {isKeyValidating ? 'Validating...' : 'Validate'}
                       </button>
                     </div>
-                    <input
-                      type="text"
-                      value={manualBaseUrl}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setManualBaseUrl(val);
-                        if (val) localStorage.setItem('gemini_base_url', val);
-                        else localStorage.removeItem('gemini_base_url');
-                      }}
-                      placeholder="Custom Base URL (opsional, misal: https://api.kei.io)"
-                      className="w-full bg-slate-200/50 dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/30 outline-none transition-colors focus:border-primary-500"
-                    />
                   </div>
                   {(isKeyValidating || keyValidationStatus !== 'idle') && (
                     <div className="flex items-start gap-2 mt-2">
@@ -459,13 +492,160 @@ export default function App() {
                           <div className="flex flex-col gap-1">
                             <span className="text-xs text-red-600 dark:text-red-400 font-bold">Validasi gagal</span>
                             <span className="text-[10px] bg-red-500/10 text-red-600 dark:text-red-400 p-2 rounded max-w-full break-words">
-                              {validationError || 'API Key tidak valid atau tidak memiliki akses (contoh gemini-1.5-flash)'}
+                              {validationError || 'API Key tidak valid atau tidak memiliki akses'}
                             </span>
                           </div>
                         </>
                       )}
                     </div>
                   )}
+                </div>
+
+                <div className="space-y-3 pt-2">
+                  <label className="text-[10px] font-mono uppercase tracking-widest text-primary-500/50">API Key AI Studio (Gemini Image)</label>
+                  <p className="text-xs text-slate-600 dark:text-white/60 mb-2">Opsional: Masukkan API Key Google AI Studio Anda untuk generate gambar.</p>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <textarea
+                        value={aistudioApiKey}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setAistudioApiKey(val);
+                          if (val) localStorage.setItem('aistudio_api_key', val);
+                          else localStorage.removeItem('aistudio_api_key');
+                        }}
+                        placeholder="AIzaSy..."
+                        className={`flex-1 bg-slate-200/50 dark:bg-white/5 border rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/30 outline-none transition-colors min-h-[60px] resize-y custom-scrollbar ${aistudioKeyValidationStatus === 'invalid' ? 'border-red-500 focus:border-red-500' : aistudioKeyValidationStatus === 'valid' ? 'border-emerald-500 focus:border-emerald-500' : 'border-slate-300 dark:border-white/10 focus:border-primary-500'}`}
+                      />
+                      <button
+                        onClick={handleValidateAistudioKey}
+                        disabled={!aistudioApiKey || isAistudioKeyValidating}
+                        className="px-4 py-3 bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white text-sm font-bold rounded-xl transition-colors whitespace-nowrap self-start"
+                      >
+                        {isAistudioKeyValidating ? 'Validating...' : 'Validate'}
+                      </button>
+                    </div>
+                  </div>
+                  {(isAistudioKeyValidating || aistudioKeyValidationStatus !== 'idle') && (
+                    <div className="flex items-start gap-2 mt-2">
+                      {isAistudioKeyValidating ? (
+                        <>
+                          <div className="w-3 h-3 border-2 border-primary-500 border-t-transparent rounded-full animate-spin mt-0.5 shrink-0" />
+                          <span className="text-xs text-slate-500 dark:text-white/60">Memvalidasi API Key...</span>
+                        </>
+                      ) : aistudioKeyValidationStatus === 'valid' ? (
+                        <>
+                          <div className="w-3 h-3 bg-emerald-500 rounded-full mt-0.5 shrink-0" />
+                          <span className="text-xs text-emerald-600 dark:text-emerald-400">API Key valid</span>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-3 h-3 bg-red-500 rounded-full mt-0.5 shrink-0" />
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs text-red-600 dark:text-red-400 font-bold">Validasi gagal</span>
+                            <span className="text-[10px] bg-red-500/10 text-red-600 dark:text-red-400 p-2 rounded max-w-full break-words">
+                              {aistudioValidationError || 'API Key tidak valid'}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-slate-100/50 dark:bg-white/[0.02] border border-slate-200 dark:border-white/10 rounded-2xl p-5 mt-4 space-y-5">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">Model & Endpoint</h3>
+                    <p className="text-xs text-slate-500 dark:text-white/50 leading-relaxed mt-1">
+                      Semua lewat api.kie.ai: GPT / Gemini di /.../v1/chat/completions (bukan OpenAI/Google langsung). Jika muncul «Failed to fetch», biasanya jaringan/pemblokir — bukan saldo.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-white/50">Mesin (KIE.AI)</label>
+                    <div className="relative">
+                      <select
+                        value={kieModel}
+                        onChange={(e) => {
+                          setKieModel(e.target.value);
+                          localStorage.setItem('kie_model', e.target.value);
+                        }}
+                        className="w-full bg-slate-200/50 dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-primary-500 appearance-none"
+                      >
+                        <option value="gpt-4o-mini">GPT-4o Mini — .../gpt-4o-mini/v1/chat/completions</option>
+                        <option value="gpt-4o">GPT-4o — .../gpt-4o/v1/chat/completions</option>
+                        <option value="gpt-5.2">GPT-5.2 — .../gpt-5-2/v1/chat/completions</option>
+                        <option value="gemini-1.5-pro">Gemini 1.5 Pro — .../gemini-1.5-pro/v1/chat/completions</option>
+                        <option value="gemini-1.5-flash">Gemini 1.5 Flash — .../gemini-1.5-flash/v1/chat/completions</option>
+                        <option value="claude-3-opus">Claude 3 Opus — .../claude-3-opus/v1/chat/completions</option>
+                        <option value="claude-3-5-sonnet">Claude 3.5 Sonnet — .../claude-3-5-sonnet/v1/chat/completions</option>
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-500 dark:text-white/50">
+                        <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/></svg>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-white/50">Max Completion Tokens</label>
+                    <input
+                      type="number"
+                      value={kieMaxTokens}
+                      onChange={(e) => {
+                        setKieMaxTokens(e.target.value);
+                        localStorage.setItem('kie_max_tokens', e.target.value);
+                      }}
+                      className="w-full bg-slate-200/50 dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-primary-500"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-white/50">Top P ({kieTopP})</label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={kieTopP}
+                      onChange={(e) => {
+                        setKieTopP(e.target.value);
+                        localStorage.setItem('kie_top_p', e.target.value);
+                      }}
+                      className="w-full accent-primary-500 h-2 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-white/50">Host Chat KIE (Base URL)</label>
+                    <input
+                      type="text"
+                      value={manualBaseUrl}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setManualBaseUrl(val);
+                        if (val) localStorage.setItem('gemini_base_url', val);
+                        else localStorage.removeItem('gemini_base_url');
+                      }}
+                      placeholder="https://api.kie.ai"
+                      className="w-full bg-slate-200/50 dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl px-4 py-3 text-sm text-slate-900 dark:text-white outline-none focus:border-primary-500"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-white/50">Temperature ({kieTemperature})</label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="2"
+                      step="0.01"
+                      value={kieTemperature}
+                      onChange={(e) => {
+                        setKieTemperature(e.target.value);
+                        localStorage.setItem('kie_temperature', e.target.value);
+                      }}
+                      className="w-full accent-primary-500 h-2 bg-slate-200 dark:bg-white/10 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -554,7 +734,7 @@ export default function App() {
           </motion.p>
         </header>
 
-        {/* Form Section */}
+        {/* Main Content */}
         <AnimatePresence mode="wait">
           {view === 'input' ? (
             <motion.section 
@@ -564,7 +744,7 @@ export default function App() {
               exit={{ opacity: 0, x: 20 }}
               className="mb-12"
             >
-              <InputForm onGenerate={handleGenerate} isLoading={isLoading} initialData={lastInputs || undefined} />
+              <InputForm onGenerate={handleGenerate} isLoading={isLoading} initialData={lastInputs || undefined} onOpenHistory={() => setView('history')} />
               
               <AnimatePresence>
                 {error && (
@@ -578,6 +758,28 @@ export default function App() {
                   </motion.div>
                 )}
               </AnimatePresence>
+            </motion.section>
+          ) : view === 'history' ? (
+            <motion.section
+              key="history-view"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="mb-12 space-y-6"
+            >
+              <HistoryList 
+                history={history}
+                onLoadHistory={(entry) => {
+                  handleLoadHistory(entry);
+                  setView('output');
+                }}
+                onDeleteHistory={handleDeleteHistory}
+                onUpdateHistory={handleUpdateHistory}
+                onBack={() => {
+                  if (outputs) setView('output');
+                  else setView('input');
+                }}
+              />
             </motion.section>
           ) : (
             <motion.div
