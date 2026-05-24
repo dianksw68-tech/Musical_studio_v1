@@ -1,11 +1,15 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { v2 as cloudinary } from "cloudinary";
+import multer from "multer";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   app.use(express.json({ limit: "50mb" }));
 
@@ -24,6 +28,10 @@ async function startServer() {
       }
 
       console.log(`Proxying request to: ${endpoint}`);
+      console.log(`Proxy headers:`, headers);
+      console.log(`Proxy body:`, body ? JSON.stringify(body) : undefined);
+      
+      fs.writeFileSync('proxy-log.txt', JSON.stringify({ endpoint, headers, body }, null, 2));
 
       const response = await fetch(endpoint, {
         method: method || "POST",
@@ -32,6 +40,8 @@ async function startServer() {
       });
 
       const responseText = await response.text();
+      console.log('Proxy response text:', responseText);
+      console.log('Proxy response status:', response.status);
       
       if (!response.ok) {
         let details = responseText;
@@ -120,6 +130,18 @@ async function startServer() {
 
     } catch (error: any) {
       console.error("Generate image error:", error);
+      
+      // Fallback to Pollinations AI for free tier quota limits
+      const isRateLimited = error?.message?.includes("429") || error?.message?.includes("quota") || error?.message?.includes("RESOURCE_EXHAUSTED");
+      
+      if (isRateLimited || !process.env.GEMINI_API_KEY && !req.body.apiKey) {
+        console.log("Falling back to Pollinations AI...");
+        const seed = Math.floor(Math.random() * 1000000);
+        const prompt = req.body.prompt;
+        const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1280&height=720&nologo=true&seed=${seed}`;
+        return res.json({ imageUrl });
+      }
+
       return res.status(500).json({ 
         error: { 
           message: error.message || "Failed to generate image" 
@@ -141,6 +163,47 @@ async function startServer() {
     } catch (error: any) {
       console.error("AI Studio Key Validation Error:", error);
       return res.status(500).json({ error: { message: error.message || "Invalid API Key" } });
+    }
+  });
+
+  // Cloudinary Upload Endpoint
+  const upload = multer({ storage: multer.memoryStorage() });
+  app.post("/api/upload", upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: { message: "No file uploaded" } });
+      }
+
+      cloudinary.config({
+        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+        api_key: process.env.CLOUDINARY_API_KEY,
+        api_secret: process.env.CLOUDINARY_API_SECRET,
+      });
+
+      if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+        return res.status(500).json({ error: { message: "Cloudinary credentials are not configured in environment variables." } });
+      }
+
+      // Convert buffer to Data URI
+      const b64 = Buffer.from(req.file.buffer).toString("base64");
+      const dataURI = "data:" + req.file.mimetype + ";base64," + b64;
+      
+      const result = await cloudinary.uploader.upload(dataURI, {
+        resource_type: "auto",
+      });
+
+      return res.json({ url: result.secure_url, public_id: result.public_id });
+    } catch (error: any) {
+      console.error("Upload error:", error);
+      
+      let errorMessage = error?.message || "Failed to upload file to Cloudinary";
+      
+      // If Cloudinary returns 401/403, it's typically an auth issue
+      if (errorMessage.includes("403") || errorMessage.includes("401")) {
+        errorMessage = "Cloudinary authentication failed (403). Please check if your CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET are correct in the environment variables setup.";
+      }
+      
+      return res.status(500).json({ error: { message: errorMessage } });
     }
   });
 

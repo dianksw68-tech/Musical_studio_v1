@@ -381,20 +381,29 @@ export async function generateStudioAssets(inputs: AppInputs): Promise<AppOutput
     let result;
     try {
       const text = responseText || '{}';
-      const jsonString = text.replace(/```json\n?|```/g, '').trim();
+      
+      // Try to find JSON within a code block first
+      const jsonBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+      let jsonString = '';
+      
+      if (jsonBlockMatch && jsonBlockMatch[1].trim().startsWith('{')) {
+        jsonString = jsonBlockMatch[1].trim();
+      } else {
+        // If no code block or the block doesn't start with '{', search for the first '{' and last '}'
+        const objectMatch = text.match(/\{[\s\S]*\}/);
+        if (objectMatch) {
+          jsonString = objectMatch[0];
+        } else {
+          // Fallback to straight replace
+          jsonString = text.replace(/```json\n?|```/g, '').trim();
+        }
+      }
+      
       result = JSON.parse(jsonString);
     } catch (e) {
       console.error("Failed to parse JSON from AI:", e);
-      const match = responseText?.match(/\{[\s\S]*\}/);
-      if (match) {
-        try {
-          result = JSON.parse(match[0]);
-        } catch (e2) {
-          throw new Error("Gagal memproses format data dari AI. Silakan coba lagi.");
-        }
-      } else {
-        throw new Error("AI tidak memberikan format data yang sesuai.");
-      }
+      console.log("Raw Response Text:", responseText);
+      throw new Error("Gagal memproses format data dari AI. Silakan coba lagi.");
     }
     
     const ensureString = (val: any): string => {

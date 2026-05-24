@@ -339,12 +339,17 @@ export const InputForm: React.FC<InputFormProps> = ({ onGenerate, isLoading, ini
                 onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (file) {
-                    const reader = new FileReader();
-                    reader.onloadend = async () => {
-                      const base64 = reader.result as string;
-                      setInputs({ ...inputs, characterImage: base64 });
-                    };
-                    reader.readAsDataURL(file);
+                    try {
+                      setIsDescribing(true); // Re-use the loading state or similar, maybe add upload specific one? Actually setting characterImage to '' while uploading works too, but let's just use uploadToCloudinary
+                      const { uploadToCloudinary } = await import('../services/cloudinary');
+                      const result = await uploadToCloudinary(file);
+                      setInputs({ ...inputs, characterImage: result.url });
+                    } catch (err: any) {
+                      console.error("Upload failed", err);
+                      alert(err.message || "Failed to upload image");
+                    } finally {
+                      setIsDescribing(false);
+                    }
                   }
                 }}
                 className="hidden"

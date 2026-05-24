@@ -413,25 +413,23 @@ export const OutputSection: React.FC<OutputSectionProps> = ({
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64 = reader.result as string;
-        setCustomImage(base64);
+      try {
+        setIsDescribing(true);
+        const { uploadToCloudinary } = await import('../services/cloudinary');
+        const result = await uploadToCloudinary(file);
+        setCustomImage(result.url);
         setSelectedType('full'); 
         
         // Describe the image and update prompt
-        setIsDescribing(true);
-        try {
-          const description = await describeImage(base64);
-          const newPrompt = `${description} ${outputs.textOverlayInstructions}`;
-          setEditedPrompt(newPrompt);
-        } catch (err) {
-          console.error("Failed to describe image:", err);
-        } finally {
-          setIsDescribing(false);
-        }
-      };
-      reader.readAsDataURL(file);
+        const description = await describeImage(result.url);
+        const newPrompt = `${description} ${outputs.textOverlayInstructions}`;
+        setEditedPrompt(newPrompt);
+      } catch (err: any) {
+        console.error("Failed to process image:", err);
+        alert(err.message || "Failed to upload image");
+      } finally {
+        setIsDescribing(false);
+      }
     }
   };
 
